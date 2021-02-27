@@ -1,11 +1,17 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Threading.Tasks;
 using System.Net.Http;
 using Newtonsoft.Json;
 
 using Amazon.Lambda.Core;
 using Amazon.Lambda.APIGatewayEvents;
+
+using Amazon.DynamoDBv2;
+using Amazon.DynamoDBv2.DataModel;
+using Amazon.DynamoDBv2.Model;
 
 // Assembly attribute to enable the Lambda function's JSON input to be converted into a .NET class.
 [assembly: LambdaSerializer(typeof(Amazon.Lambda.Serialization.Json.JsonSerializer))]
@@ -17,35 +23,45 @@ namespace HelloWorld
     {
 
         private static readonly HttpClient client = new HttpClient();
-
-        private static async Task<string> GetCallingIP()
+        
+        private async Task<string> ScanReadingListAsync()
         {
-            client.DefaultRequestHeaders.Accept.Clear();
-            client.DefaultRequestHeaders.Add("User-Agent", "AWS Lambda .Net Client");
+            AmazonDynamoDBClient client = new AmazonDynamoDBClient();
+            Book book;
 
-            var msg = await client.GetStringAsync("http://checkip.amazonaws.com/").ConfigureAwait(continueOnCapturedContext:false);
+            var guid = Guid.NewGuid().ToString();
 
-            return msg.Replace("\n","");
-        }
-
-        public async Task<APIGatewayProxyResponse> FunctionHandler(APIGatewayProxyRequest apiProxyEvent, ILambdaContext context)
-        {
-            LambdaLogger.Log("CONTEXT: " + JsonConvert.SerializeObject(context));
-            LambdaLogger.Log("ENVIRONMENT VARIABLES: " + JsonConvert.SerializeObject(System.Environment.GetEnvironmentVariables()));
-            
-            var location = await GetCallingIP();
-            var body = new Dictionary<string, string>
+            Book bookToAdd = new Book
             {
-                { "message", "hello world" },
-                { "location", location }
+                Id = guid,
+                Title = "Caio teste 2",
+                BookAuthors = new List<string>{ "Aline" },
+                CoverPage = "isso ai",
+                ISBN = 1233333
             };
 
-            return new APIGatewayProxyResponse
+            using (DynamoDBContext context = new DynamoDBContext(client))
             {
-                Body = JsonConvert.SerializeObject(body),
-                StatusCode = 200,
-                Headers = new Dictionary<string, string> { { "Content-Type", "application/json" } }
+                await context.SaveAsync(bookToAdd);
+                book = await context.LoadAsync<Book>(guid);
+            }
+
+            var bookString = JsonConvert.SerializeObject(book);
+            return bookString;
+        } 
+
+        private async Task<APIGatewayProxyResponse> GetAsync(APIGatewayProxyRequest request, ILambdaContext context)
+        {
+            context.Logger.LogLine("Get Request\n");
+
+            var response = new APIGatewayProxyResponse
+            {
+                StatusCode = (int)HttpStatusCode.OK,
+                Body = await ScanReadingListAsync(),
+                Headers = new Dictionary<string, string> { { "Content-Type", "text/plain" } }
             };
+
+            return response;
         }
     }
 }
